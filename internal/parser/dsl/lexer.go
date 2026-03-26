@@ -199,7 +199,7 @@ func (l *Lexer) Next() (Token, error) {
 	}
 }
 
-// Tokenize returns all tokens (excluding EOF) or an error.
+// Tokenize returns all tokens including the final EOF token, or an error.
 func Tokenize(src string) ([]Token, error) {
 	l := NewLexer(src)
 	var tokens []Token
