@@ -1,6 +1,15 @@
 package main
-import "fmt"
+
+import (
+	"fmt"
+	"os"
+
+	"github.com/ppp3ppj/bnn/cmd"
+)
 
 func main() {
-	fmt.Println("Hello, World!")
+	if err := cmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, "Error:", err)
+		os.Exit(1)
+	}
 }
