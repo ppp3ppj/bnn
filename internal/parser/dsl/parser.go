@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/ppp3ppj/bnn/ast"
+	bnnlog "github.com/ppp3ppj/bnn/internal/log"
 )
 
 // Parser turns a token stream into a ManifestNode.
@@ -100,6 +101,7 @@ func (p *Parser) parseManifest() (*ast.ManifestNode, error) {
 			}
 			p.vars[name] = value
 			m.Vars[name] = value
+			bnnlog.Debug("parser: var %s = %q", name, value)
 			continue
 		}
 		if t.Type != TOKEN_KEYWORD || t.Literal != "bunch" {
@@ -173,7 +175,9 @@ func (p *Parser) resolveConcatExpr(context string) (string, error) {
 				fmt.Sprintf("[bnn] line %d:%d — concat with empty string has no effect (%s side is empty)",
 					concatTok.Line, concatTok.Col, which))
 		}
+		before := val
 		val = val + right
+		bnnlog.Debug("parser: concat %q ++ %q → %q", before, right, val)
 	}
 	return val, nil
 }
@@ -229,6 +233,7 @@ func (p *Parser) interpolate(s string, line, col int) (string, error) {
 		if !ok {
 			return "", fmt.Errorf("[bnn] line %d:%d — ~%s~ is not defined — declare it above with %s = \"value\".", line, col, name, name)
 		}
+		bnnlog.Debug("parser: interpolate ~%s~ → %q", name, val)
 		sb.WriteString(val)
 		i = j + 1
 	}
@@ -301,7 +306,7 @@ func (p *Parser) parseBunch() (ast.BunchNode, error) {
 		if t.Type == TOKEN_RPAREN {
 			break
 		}
-		if err := p.parseBunchArg(&b, localBound, outerVars); err != nil {
+		if err := p.parseBunchArg(&b, localBound, outerVars, nameTok.Literal); err != nil {
 			return ast.BunchNode{}, err
 		}
 	}
@@ -315,7 +320,7 @@ func (p *Parser) parseBunch() (ast.BunchNode, error) {
 	return b, nil
 }
 
-func (p *Parser) parseBunchArg(b *ast.BunchNode, localBound map[string]bool, outerVars map[string]string) error {
+func (p *Parser) parseBunchArg(b *ast.BunchNode, localBound map[string]bool, outerVars map[string]string, bunchName string) error {
 	t := p.peek()
 
 	// local variable binding: Version = "22"  (no period — comma-separated arg)
@@ -338,6 +343,7 @@ func (p *Parser) parseBunchArg(b *ast.BunchNode, localBound map[string]bool, out
 		}
 		localBound[nameTok.Literal] = true
 		p.vars[nameTok.Literal] = value
+		bnnlog.Debug("parser: local var %s = %q (in bunch %s)", nameTok.Literal, value, bunchName)
 		return nil
 	}
 

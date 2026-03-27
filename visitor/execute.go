@@ -4,6 +4,7 @@ import (
 	"os/exec"
 
 	"github.com/ppp3ppj/bnn/ast"
+	bnnlog "github.com/ppp3ppj/bnn/internal/log"
 )
 
 // MiseRunner is the interface Execute depends on.
@@ -43,10 +44,14 @@ func (e *Executor) Execute(m *ast.ManifestNode) error {
 
 // VisitBunch runs the check guard first; skips the bunch when check exits 0.
 func (e *Executor) VisitBunch(b ast.BunchNode) error {
+	bnnlog.Debug("execute: bunch %s — enter", b.Name)
 	if b.Check != "" {
+		bnnlog.Debug("execute: bunch %s — check: %s", b.Name, b.Check)
 		if err := e.CheckRun(b.Check); err == nil {
+			bnnlog.Debug("execute: bunch %s — check passed, skipping", b.Name)
 			return nil // already configured — skip
 		}
+		bnnlog.Debug("execute: bunch %s — check failed, running", b.Name)
 	}
 	if err := e.VisitRuntime(b.Name, b.Runtime); err != nil {
 		return err
@@ -56,6 +61,7 @@ func (e *Executor) VisitBunch(b ast.BunchNode) error {
 			return err
 		}
 	}
+	bnnlog.Debug("execute: bunch %s — done", b.Name)
 	return nil
 }
 
@@ -66,19 +72,24 @@ func (e *Executor) VisitBunch(b ast.BunchNode) error {
 func (e *Executor) VisitRuntime(name string, rt ast.RuntimeNode) error {
 	switch rt.Type {
 	case ast.RuntimeMise:
+		bnnlog.Debug("execute: runtime mise install %s@%s", name, rt.Version)
 		if err := e.Runner.Install(name, rt.Version); err != nil {
 			return err
 		}
+		bnnlog.Debug("execute: runtime mise global  %s@%s", name, rt.Version)
 		return e.Runner.SetGlobal(name, rt.Version)
 	case ast.RuntimeBrew:
+		bnnlog.Debug("execute: runtime brew install %s", name)
 		return e.Runner.Exec("brew install " + name)
 	default: // shell
+		bnnlog.Debug("execute: runtime shell — no-op for %s", name)
 		return nil
 	}
 }
 
 // VisitStep executes a single step command inside the mise environment.
 func (e *Executor) VisitStep(s ast.StepNode) error {
+	bnnlog.Debug("execute: step %s: %s", s.Kind, s.Command)
 	return e.Runner.Exec(s.Command)
 }
 

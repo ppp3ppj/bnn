@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/ppp3ppj/bnn/ast"
+	bnnlog "github.com/ppp3ppj/bnn/internal/log"
 )
 
 // Resolve returns the bunches sorted in dependency order using Kahn's algorithm.
@@ -64,6 +65,14 @@ func Resolve(m *ast.ManifestNode) ([]ast.BunchNode, error) {
 		}
 		// insert in ascending index order to preserve declaration order
 		insertSorted(ready, &queue)
+	}
+
+	if bnnlog.Enabled() {
+		names := make([]string, len(result))
+		for i, b := range result {
+			names[i] = b.Name
+		}
+		bnnlog.Debug("resolve: order → %s", strings.Join(names, " → "))
 	}
 
 	if len(result) != n {
