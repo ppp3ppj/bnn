@@ -114,23 +114,17 @@ func (p *Parser) parseManifest() (*ast.ManifestNode, error) {
 	return m, nil
 }
 
-// parseVarBinding = VAR "=" string "."
+// parseVarBinding = VAR "=" (string | VAR) "."
 func (p *Parser) parseVarBinding() (name, value string, err error) {
 	nameTok := p.advance() // consume VAR token
 	if _, err = p.expect(TOKEN_EQUALS, "="); err != nil {
 		return "", "", err
 	}
-	valTok, err := p.expect(TOKEN_STRING, "")
+	value, err = p.resolveStringOrVar("variable value")
 	if err != nil {
-		return "", "", fmt.Errorf("[bnn] line %d:%d — variable value must be a quoted string, found %q",
-			p.tokens[p.pos-1].Line, p.tokens[p.pos-1].Col, p.tokens[p.pos-1].Literal)
-	}
-	if _, err = p.expect(TOKEN_PERIOD, "."); err != nil {
 		return "", "", err
 	}
-	// interpolate so vars can be composed: Base = "v~Major~.0".
-	value, err = p.interpolate(valTok.Literal, valTok.Line, valTok.Col)
-	if err != nil {
+	if _, err = p.expect(TOKEN_PERIOD, "."); err != nil {
 		return "", "", err
 	}
 	return nameTok.Literal, value, nil
@@ -223,6 +217,16 @@ func (p *Parser) parseBunch() (ast.BunchNode, error) {
 			p.tokens[p.pos-1].Line, p.tokens[p.pos-1].Col, p.tokens[p.pos-1].Literal)
 	}
 
+	// Save manifest-level vars and enter a local scope for this bunch.
+	// Any VAR = "value" inside the bunch is visible only until the closing ")".
+	// Shadowing a manifest-level name is a parse-time error (Erlang single-assignment).
+	outerVars := make(map[string]string, len(p.vars))
+	for k, v := range p.vars {
+		outerVars[k] = v
+	}
+	localBound := make(map[string]bool) // tracks names bound in this bunch
+	defer func() { p.vars = outerVars }()
+
 	b := ast.BunchNode{Name: nameTok.Literal}
 
 	// parse comma-separated bunch args
@@ -238,7 +242,7 @@ func (p *Parser) parseBunch() (ast.BunchNode, error) {
 		if t.Type == TOKEN_RPAREN {
 			break
 		}
-		if err := p.parseBunchArg(&b); err != nil {
+		if err := p.parseBunchArg(&b, localBound, outerVars); err != nil {
 			return ast.BunchNode{}, err
 		}
 	}
@@ -252,10 +256,34 @@ func (p *Parser) parseBunch() (ast.BunchNode, error) {
 	return b, nil
 }
 
-func (p *Parser) parseBunchArg(b *ast.BunchNode) error {
+func (p *Parser) parseBunchArg(b *ast.BunchNode, localBound map[string]bool, outerVars map[string]string) error {
 	t := p.peek()
+
+	// local variable binding: Version = "22"  (no period — comma-separated arg)
+	if t.Type == TOKEN_VAR {
+		nameTok := p.advance()
+		if _, err := p.expect(TOKEN_EQUALS, "="); err != nil {
+			return err
+		}
+		value, err := p.resolveStringOrVar("variable value")
+		if err != nil {
+			return err
+		}
+		if _, inOuter := outerVars[nameTok.Literal]; inOuter {
+			return fmt.Errorf("[bnn] line %d:%d — %s is already declared at manifest level — local variables cannot shadow global ones",
+				nameTok.Line, nameTok.Col, nameTok.Literal)
+		}
+		if localBound[nameTok.Literal] {
+			return fmt.Errorf("[bnn] line %d:%d — variable %s is already bound in this bunch (single-assignment only)",
+				nameTok.Line, nameTok.Col, nameTok.Literal)
+		}
+		localBound[nameTok.Literal] = true
+		p.vars[nameTok.Literal] = value
+		return nil
+	}
+
 	if t.Type != TOKEN_KEYWORD {
-		return fmt.Errorf("[bnn] line %d:%d — expected a bunch argument (runtime, depends, check, or steps), found %q", t.Line, t.Col, t.Literal)
+		return fmt.Errorf("[bnn] line %d:%d — expected a bunch argument (runtime, depends, check, steps, or a local variable), found %q", t.Line, t.Col, t.Literal)
 	}
 	switch t.Literal {
 	case "runtime":
