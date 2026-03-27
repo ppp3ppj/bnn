@@ -6,28 +6,25 @@ A declarative machine setup tool powered by [mise](https://mise.jdx.dev), with a
 
 ---
 
-## Philosophy
+## Prerequisites
 
-- Replace Ansible for local dev machine setup
-- Declare runtimes and setup steps in a clean DSL
-- Idempotent by default via `check` guards
-- Extend via `bunch` — self-contained setup units
-- Powered by `mise` for runtime management
+- [mise](https://mise.jdx.dev) installed and in `PATH`
+- Go 1.22+
 
 ---
 
-## Installation
+## Build
 
 ```bash
-# macOS (Homebrew)
-brew tap you/bnn
-brew install bnn
+git clone https://github.com/ppp3ppj/bnn
+cd bnn
+go build -o bnn .
+```
 
-# Linux / macOS (curl)
-curl -fsSL https://raw.githubusercontent.com/you/bnn/main/install.sh | sh
+Or run directly without building:
 
-# Go install
-go install github.com/you/bnn@latest
+```bash
+go run . <command>
 ```
 
 ---
@@ -41,7 +38,6 @@ Create a `bnn.conf` in your project or home directory:
 
 bunch(ruby,
     runtime(mise, "3.3"),
-    depends([]),
     check("mise current ruby | grep 3.3"),
     steps([
         pre("echo preparing ruby"),
@@ -53,7 +49,6 @@ bunch(ruby,
 
 bunch(node,
     runtime(mise, "22"),
-    depends([]),
     check("mise current node | grep 22"),
     steps([
         run("npm install -g pnpm"),
@@ -78,78 +73,115 @@ bnn apply
 
 ---
 
-## CLI Commands
+## Commands
 
-| Command | Description |
-|---|---|
-| `bnn apply` | Apply all bunches |
-| `bnn apply ruby` | Apply specific bunch |
-| `bnn apply --dry` | Dry run — print what would happen |
-| `bnn status` | Show installed vs declared state |
-| `bnn check` | Run all check guards, report state |
-| `bnn migrate` | Detect rvm/nvm/rbenv and migrate to mise |
-| `bnn doctor` | Check prerequisites (mise installed, PATH set) |
+### `bnn apply`
+
+Apply all bunches in dependency order.
+
+```bash
+bnn apply
+```
+
+### `bnn apply <bunch>`
+
+Apply a single bunch by name.
+
+```bash
+bnn apply ruby
+```
+
+### `bnn apply --dry`
+
+Print every command that would run without executing anything.
+
+```bash
+bnn apply --dry
+bnn apply ruby --dry
+```
+
+Example output:
+
+```
+--- bunch: ruby ---
+[dry] check: mise current ruby | grep 3.3  (skip bunch if exits 0)
+[dry] mise install ruby@3.3
+[dry] mise global  ruby@3.3
+[dry] pre: echo preparing ruby
+[dry] run: gem install bundler
+[dry] run: gem install rubocop
+[dry] post: echo ruby ready
+```
+
+### `bnn status`
+
+Run each bunch's `check` command and show the result.
+
+```bash
+bnn status
+```
+
+```
+ruby            ✓  mise current ruby | grep 3.3
+node            ✗  mise current node | grep 22
+rails           ?  no check declared
+```
+
+- `✓` — check exits 0, bunch already configured
+- `✗` — check fails, bunch needs to run
+- `?` — no check declared
+
+### `bnn doctor`
+
+Verify prerequisites are in place.
+
+```bash
+bnn doctor
+```
+
+```
+✓  mise found: /home/user/.local/share/mise/bin/mise
+✓  bnn.conf found
+```
 
 ---
 
-## DSL Syntax
+## DSL Reference
 
-### Top Level Structure
+### Structure
 
-Every top-level term ends with a period `.`
+Every top-level term ends with `.`
 
 ```erlang
 bunch(name, arg1, arg2, ...).
 ```
 
-### `bunch`
+### `bunch` arguments
 
-Declares a setup unit.
-
-```erlang
-bunch(ruby,
-    runtime(mise, "3.3"),
-    depends([]),
-    check("mise current ruby | grep 3.3"),
-    steps([
-        pre("echo preparing ruby"),
-        run("gem install bundler"),
-        post("echo ruby ready")
-    ])
-).
-```
-
-| Arg | Required | Description |
+| Argument | Required | Description |
 |---|---|---|
-| name | yes | atom — identifier for this bunch |
+| name | yes | identifier for this bunch (unquoted) |
 | `runtime(...)` | yes | which tool manages this runtime |
-| `depends([])` | no | list of bunches to run before this one |
-| `check(...)` | no | if command exits 0 — skip this bunch |
-| `steps([...])` | yes | ordered list of commands to execute |
+| `depends([...])` | no | bunches that must run before this one |
+| `check("cmd")` | no | shell command — if exits 0 the bunch is skipped |
+| `steps([...])` | yes | ordered commands to execute |
 
 ### `runtime`
 
 ```erlang
-runtime(mise, "3.3")    % mise manages ruby 3.3
-runtime(brew)           % homebrew manages this
-runtime(shell)          % plain shell, no runtime manager
+runtime(mise, "3.3")   % mise installs and manages the version
+runtime(brew)          % homebrew manages this tool
+runtime(shell)         % no runtime manager, run steps directly
 ```
-
-| Atom | Description |
-|---|---|
-| `mise` | use mise to install and manage version |
-| `brew` | use homebrew |
-| `shell` | run steps directly in shell |
 
 ### `depends`
 
 ```erlang
-depends([])              % no dependencies
-depends([ruby])          % run after ruby bunch
-depends([ruby, node])    % run after both
+depends([ruby, node])  % run after ruby and node are done
+depends([])            % no dependencies
 ```
 
-List of atoms — unquoted bunch names.
+Bunch names — unquoted, no quotes.
 
 ### `check`
 
@@ -163,57 +195,19 @@ check("test -f ~/.gitconfig")
 
 ### `steps`
 
-Ordered list of `pre`, `run`, and `post` terms.
-
 ```erlang
 steps([
-    pre("echo before"),        % runs first
-    run("gem install bundler"),% main steps — can have multiple
-    run("gem install rubocop"),
-    post("echo after")         % runs last
+    pre("echo before"),         % runs first, optional
+    run("gem install bundler"), % main work, required (at least one)
+    run("gem install rubocop"), % multiple run() allowed
+    post("echo after")          % runs last, optional
 ])
 ```
 
-| Term | Description |
-|---|---|
-| `pre(cmd)` | runs before all `run` steps — optional |
-| `run(cmd)` | main execution — required, multiple allowed |
-| `post(cmd)` | runs after all `run` steps — optional |
+### Comments
 
----
-
-## Token Reference
-
-```
-KEYWORD     bunch, runtime, depends, check, steps, pre, run, post
-ATOM        ruby, mise, shell, node     unquoted lowercase identifier
-STRING      "3.3", "gem install ..."    always quoted
-LPAREN      (
-RPAREN      )
-LBRACKET    [
-RBRACKET    ]
-COMMA       ,
-PERIOD      .                           top level term terminator
-COMMENT     %                           rest of line ignored
-```
-
----
-
-## AST Structure
-
-```
-ManifestNode
-└── BunchNode
-    ├── Name        atom       ruby
-    ├── Runtime
-    │   ├── Type    atom       mise | brew | shell
-    │   └── Version string     "3.3"
-    ├── Depends     []atom     [node, ruby]
-    ├── Check       string     "mise current ruby | grep 3.3"
-    └── Steps       []StepNode
-        ├── StepNode  pre    "echo preparing ruby"
-        ├── StepNode  run    "gem install bundler"
-        └── StepNode  post   "echo ruby ready"
+```erlang
+% this is a comment — rest of line is ignored
 ```
 
 ---
@@ -222,87 +216,36 @@ ManifestNode
 
 ```
 bnn.conf
-     ↓
-   Lexer        tokenize source
-     ↓
-  Parser        tokens → AST
-     ↓
- Validator      check rules, depends targets exist, runtimes valid
-     ↓
-  Visitor       walk AST
-     ↓
-mise install ruby@3.3
-mise global  ruby@3.3
-gem install bundler
+    ↓
+  Lexer       tokenize source
+    ↓
+ Parser       tokens → AST
+    ↓
+Validator     rules: runtime valid, depends targets exist,
+              no duplicate names, at least one run(),
+              no circular dependencies
+    ↓
+ Resolve      topological sort by depends
+    ↓
+ Execute      for each bunch:
+                1. run check — skip if exits 0
+                2. mise install + mise global  (mise runtime)
+                   brew install <name>         (brew runtime)
+                3. mise exec -- sh -c <cmd>    (each step)
 ```
 
 ---
 
-## Nesting Levels
+## Error Messages
+
+Errors include location and context:
 
 ```
-level 0     bunch(...).            top level term
-level 1     runtime(...)           arg of bunch
-level 1     depends([])            arg of bunch
-level 1     check(...)             arg of bunch
-level 1     steps([...])           arg of bunch
-level 2     pre(...)               item inside steps list
-level 2     run(...)               item inside steps list
-level 2     post(...)              item inside steps list
+[bnn] line 4:7 — expected a bunch declaration, found "foo"
+[bnn] bunch 'rails' — depends on 'ruby' which is not declared
+[bnn] circular dependency — rails → ruby → rails
+[bnn] bunch 'ruby' — steps must contain at least one run() command
 ```
-
----
-
-## Syntax Rules
-
-```
-1   every top level term ends with .
-2   args separated by ,
-3   bunch name is always ATOM — no quotes
-4   runtime manager is always ATOM — mise brew shell
-5   versions are always STRING — "3.3" "22"
-6   commands are always STRING — "gem install bundler"
-7   depends list contains ATOMs — no quotes on names
-8   steps list is ordered — pre runs first, post runs last
-9   pre and post are optional — run is required
-10  multiple run() allowed — executes in order declared
-11  % starts a comment — rest of line ignored
-```
-
----
-
-## Migration from rvm / nvm / rbenv
-
-bnn detects legacy version managers and migrates to mise:
-
-```bash
-bnn migrate
-```
-
-```
-⚠ Found: rvm (ruby) — active version: 3.3.0
-→ Installing ruby@3.3.0 via mise ✓
-→ Setting ruby@3.3.0 as global ✓
-
-⚠ ACTION REQUIRED: Remove rvm init from shell config
-  Look for pattern: \[ -s.*rvm
-  In files: ~/.bashrc, ~/.zshrc, ~/.bash_profile
-
-✓ Migration complete
-  Restart your shell or run: exec $SHELL
-```
-
-Detected managers:
-
-| Manager | Runtime |
-|---|---|
-| `rvm` | ruby |
-| `rbenv` | ruby |
-| `chruby` | ruby |
-| `nvm` | node |
-| `nodenv` | node |
-| `fnm` | node |
-| `pyenv` | python |
 
 ---
 
@@ -311,34 +254,26 @@ Detected managers:
 ```
 bnn/
 ├── main.go
+├── bnn.conf
 ├── ast/
-│   └── ast.go                  AST node definitions
-├── internal/
-│   └── parser/
-│       ├── dsl/
-│       │   ├── lexer.go        tokenizer
-│       │   ├── parser.go       tokens → AST
-│       │   └── parser_test.go
-│       └── toml/               legacy TOML parser (v0.1)
+│   └── ast.go                   AST node types
+├── internal/parser/dsl/
+│   ├── lexer.go                 tokenizer
+│   ├── parser.go                tokens → AST
+│   └── parser_test.go
 ├── runner/
-│   └── runner.go               mise shell execution
+│   └── runner.go                mise: Install, SetGlobal, Exec
 ├── visitor/
-│   ├── execute.go              walk AST → run commands
-│   ├── dryrun.go               walk AST → print only
-│   └── validate.go             walk AST → check rules
+│   ├── validate.go              rule checker
+│   ├── resolve.go               topological sort
+│   ├── dryrun.go                print-only walker
+│   └── execute.go               AST → mise runner
 └── cmd/
+    ├── root.go
     ├── apply.go
     ├── status.go
-    ├── migrate.go
     └── doctor.go
 ```
-
----
-
-## Prerequisites
-
-- [mise](https://mise.jdx.dev) installed and in PATH
-- Go 1.22+ (for building from source)
 
 ---
 
