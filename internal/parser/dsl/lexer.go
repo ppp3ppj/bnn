@@ -12,6 +12,7 @@ const (
 	TOKEN_ATOM    TokenType = iota // unquoted lowercase identifier
 	TOKEN_STRING                   // "..."
 	TOKEN_KEYWORD                  // bunch runtime depends check steps pre run post
+	TOKEN_VAR                      // uppercase-start identifier: NodeVersion, PnpmCmd
 
 	// punctuation
 	TOKEN_LPAREN
@@ -20,6 +21,7 @@ const (
 	TOKEN_RBRACKET
 	TOKEN_COMMA
 	TOKEN_PERIOD
+	TOKEN_EQUALS // =
 
 	TOKEN_EOF
 	TOKEN_ILLEGAL
@@ -137,9 +139,23 @@ func (l *Lexer) readString() (Token, error) {
 }
 
 func isLower(ch rune) bool { return ch >= 'a' && ch <= 'z' }
+func isUpper(ch rune) bool { return ch >= 'A' && ch <= 'Z' }
 func isAlnum(ch rune) bool {
 	return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
 		(ch >= '0' && ch <= '9') || ch == '_'
+}
+
+func (l *Lexer) readVar() Token {
+	line, col := l.line, l.col
+	var sb strings.Builder
+	for {
+		ch, ok := l.peek()
+		if !ok || !isAlnum(ch) {
+			break
+		}
+		sb.WriteRune(l.advance())
+	}
+	return Token{Type: TOKEN_VAR, Literal: sb.String(), Line: line, Col: col}
 }
 
 func (l *Lexer) readIdent() Token {
@@ -172,6 +188,8 @@ func (l *Lexer) Next() (Token, error) {
 	switch {
 	case ch == '"':
 		return l.readString()
+	case isUpper(ch) || ch == '_':
+		return l.readVar(), nil
 	case isLower(ch):
 		return l.readIdent(), nil
 	case ch == '(':
@@ -192,6 +210,9 @@ func (l *Lexer) Next() (Token, error) {
 	case ch == '.':
 		l.advance()
 		return Token{Type: TOKEN_PERIOD, Literal: ".", Line: line, Col: col}, nil
+	case ch == '=':
+		l.advance()
+		return Token{Type: TOKEN_EQUALS, Literal: "=", Line: line, Col: col}, nil
 	default:
 		l.advance()
 		return Token{Type: TOKEN_ILLEGAL, Literal: string(ch), Line: line, Col: col},

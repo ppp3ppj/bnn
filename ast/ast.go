@@ -35,5 +35,6 @@ type BunchNode struct {
 }
 
 type ManifestNode struct {
+	Vars    map[string]string // variables bound at top level: NodeVersion = "22".
 	Bunches []BunchNode
 }

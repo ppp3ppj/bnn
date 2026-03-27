@@ -10,22 +10,25 @@ import (
 //
 // Grammar:
 //
-//	manifest    = bunch_term* EOF
+//	manifest    = (var_binding | bunch_term)* EOF
+//	var_binding = VAR "=" string "."      e.g.  NodeVersion = "22".
 //	bunch_term  = "bunch" "(" atom "," bunch_args ")" "."
 //	bunch_args  = bunch_arg ("," bunch_arg)*
 //	bunch_arg   = runtime_arg | depends_arg | check_arg | steps_arg
-//	runtime_arg = "runtime" "(" atom ("," string)? ")"
+//	runtime_arg = "runtime" "(" atom ("," string_or_var)? ")"
 //	depends_arg = "depends" "(" "[" (atom ("," atom)*)? "]" ")"
-//	check_arg   = "check"   "(" string ")"
+//	check_arg   = "check"   "(" string_or_var ")"
 //	steps_arg   = "steps"   "(" "[" (step ("," step)*)? "]" ")"
-//	step        = ("pre"|"run"|"post") "(" string ")"
+//	step        = ("pre"|"run"|"post") "(" string_or_var ")"
+//	string_or_var = string | VAR
 type Parser struct {
 	tokens []Token
 	pos    int
+	vars   map[string]string // bound variables: Name → value
 }
 
 func NewParser(tokens []Token) *Parser {
-	return &Parser{tokens: tokens}
+	return &Parser{tokens: tokens, vars: make(map[string]string)}
 }
 
 // Parse is the entry point.
@@ -72,16 +75,34 @@ func (p *Parser) expectKeyword(kw string) error {
 	return err
 }
 
-// parseManifest = bunch_term* EOF
+// parseManifest = (var_binding | bunch_term)* EOF
 func (p *Parser) parseManifest() (*ast.ManifestNode, error) {
-	m := &ast.ManifestNode{}
+	m := &ast.ManifestNode{Vars: make(map[string]string)}
 	for {
 		t := p.peek()
 		if t.Type == TOKEN_EOF {
 			break
 		}
+		// VarName = "value".
+		if t.Type == TOKEN_VAR {
+			name, value, err := p.parseVarBinding()
+			if err != nil {
+				return nil, err
+			}
+			if _, already := p.vars[name]; already {
+				return nil, fmt.Errorf("[bnn] line %d:%d — variable %s is already bound (single-assignment only)", t.Line, t.Col, name)
+			}
+			p.vars[name] = value
+			m.Vars[name] = value
+			continue
+		}
 		if t.Type != TOKEN_KEYWORD || t.Literal != "bunch" {
-			return nil, fmt.Errorf("[bnn] line %d:%d — expected a bunch declaration, found %q", t.Line, t.Col, t.Literal)
+			if t.Type == TOKEN_ATOM {
+				return nil, fmt.Errorf("[bnn] line %d:%d — %q looks like a variable but variables must start with an uppercase letter or _ (e.g. %s%s)",
+					t.Line, t.Col, t.Literal,
+					string(t.Literal[0]-32), t.Literal[1:])
+			}
+			return nil, fmt.Errorf("[bnn] line %d:%d — expected a variable binding (e.g. NodeVersion = \"22\".) or bunch declaration, found %q", t.Line, t.Col, t.Literal)
 		}
 		b, err := p.parseBunch()
 		if err != nil {
@@ -90,6 +111,49 @@ func (p *Parser) parseManifest() (*ast.ManifestNode, error) {
 		m.Bunches = append(m.Bunches, b)
 	}
 	return m, nil
+}
+
+// parseVarBinding = VAR "=" string "."
+func (p *Parser) parseVarBinding() (name, value string, err error) {
+	nameTok := p.advance() // consume VAR token
+	if _, err = p.expect(TOKEN_EQUALS, "="); err != nil {
+		return "", "", err
+	}
+	valTok, err := p.expect(TOKEN_STRING, "")
+	if err != nil {
+		return "", "", fmt.Errorf("[bnn] line %d:%d — variable value must be a quoted string, found %q",
+			p.tokens[p.pos-1].Line, p.tokens[p.pos-1].Col, p.tokens[p.pos-1].Literal)
+	}
+	if _, err = p.expect(TOKEN_PERIOD, "."); err != nil {
+		return "", "", err
+	}
+	return nameTok.Literal, valTok.Literal, nil
+}
+
+// resolveStringOrVar reads either a quoted string or a variable reference.
+// It returns the resolved string value.
+func (p *Parser) resolveStringOrVar(context string) (string, error) {
+	t := p.peek()
+	switch t.Type {
+	case TOKEN_STRING:
+		p.advance()
+		return t.Literal, nil
+	case TOKEN_VAR:
+		p.advance()
+		val, ok := p.vars[t.Literal]
+		if !ok {
+			return "", fmt.Errorf("[bnn] line %d:%d — variable %s is not defined", t.Line, t.Col, t.Literal)
+		}
+		return val, nil
+	case TOKEN_ATOM:
+		p.advance()
+		return "", fmt.Errorf("[bnn] line %d:%d — %q looks like a variable but variables must start with an uppercase letter or _ (e.g. %s%s)",
+			t.Line, t.Col, t.Literal,
+			string(t.Literal[0]-32), t.Literal[1:])
+	default:
+		p.advance()
+		return "", fmt.Errorf("[bnn] line %d:%d — %s must be a quoted string or variable (e.g. \"value\" or NodeVersion), found %q", t.Line, t.Col, context, t.Literal)
+	}
 }
 
 // bunch_term = "bunch" "(" atom "," bunch_args ")" "."
@@ -188,15 +252,14 @@ func (p *Parser) parseRuntime() (ast.RuntimeNode, error) {
 	}
 	rt := ast.RuntimeNode{Type: ast.RuntimeKind(typeTok.Literal)}
 
-	// optional version string
+	// optional version string or variable
 	if p.peek().Type == TOKEN_COMMA {
 		p.advance() // consume comma
-		verTok, err := p.expect(TOKEN_STRING, "")
+		ver, err := p.resolveStringOrVar("runtime version")
 		if err != nil {
-			return ast.RuntimeNode{}, fmt.Errorf("[bnn] line %d:%d — runtime version must be a quoted string like \"3.3\", found %q",
-				p.tokens[p.pos-1].Line, p.tokens[p.pos-1].Col, p.tokens[p.pos-1].Literal)
+			return ast.RuntimeNode{}, err
 		}
-		rt.Version = verTok.Literal
+		rt.Version = ver
 	}
 
 	if _, err := p.expect(TOKEN_RPAREN, ")"); err != nil {
@@ -241,7 +304,7 @@ func (p *Parser) parseDepends() ([]string, error) {
 	return deps, nil
 }
 
-// check_arg = "check" "(" string ")"
+// check_arg = "check" "(" string_or_var ")"
 func (p *Parser) parseCheck() (string, error) {
 	if err := p.expectKeyword("check"); err != nil {
 		return "", err
@@ -249,15 +312,14 @@ func (p *Parser) parseCheck() (string, error) {
 	if _, err := p.expect(TOKEN_LPAREN, "("); err != nil {
 		return "", err
 	}
-	cmd, err := p.expect(TOKEN_STRING, "")
+	cmd, err := p.resolveStringOrVar("check command")
 	if err != nil {
-		return "", fmt.Errorf("[bnn] line %d:%d — check command must be a quoted string, found %q",
-			p.tokens[p.pos-1].Line, p.tokens[p.pos-1].Col, p.tokens[p.pos-1].Literal)
+		return "", err
 	}
 	if _, err := p.expect(TOKEN_RPAREN, ")"); err != nil {
 		return "", err
 	}
-	return cmd.Literal, nil
+	return cmd, nil
 }
 
 // steps_arg = "steps" "(" "[" (step ("," step)*)? "]" ")"
@@ -316,13 +378,12 @@ func (p *Parser) parseStep() (ast.StepNode, error) {
 	if _, err := p.expect(TOKEN_LPAREN, "("); err != nil {
 		return ast.StepNode{}, err
 	}
-	cmd, err := p.expect(TOKEN_STRING, "")
+	cmd, err := p.resolveStringOrVar("step command")
 	if err != nil {
-		return ast.StepNode{}, fmt.Errorf("[bnn] line %d:%d — step command must be a quoted string, found %q",
-			p.tokens[p.pos-1].Line, p.tokens[p.pos-1].Col, p.tokens[p.pos-1].Literal)
+		return ast.StepNode{}, err
 	}
 	if _, err := p.expect(TOKEN_RPAREN, ")"); err != nil {
 		return ast.StepNode{}, err
 	}
-	return ast.StepNode{Kind: kind, Command: cmd.Literal}, nil
+	return ast.StepNode{Kind: kind, Command: cmd}, nil
 }
