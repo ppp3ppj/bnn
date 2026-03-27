@@ -21,7 +21,8 @@ const (
 	TOKEN_RBRACKET
 	TOKEN_COMMA
 	TOKEN_PERIOD
-	TOKEN_EQUALS // =
+	TOKEN_EQUALS  // =
+	TOKEN_CONCAT  // ++
 
 	TOKEN_EOF
 	TOKEN_ILLEGAL
@@ -213,6 +214,14 @@ func (l *Lexer) Next() (Token, error) {
 	case ch == '=':
 		l.advance()
 		return Token{Type: TOKEN_EQUALS, Literal: "=", Line: line, Col: col}, nil
+	case ch == '+':
+		l.advance()
+		if next, ok := l.peek(); ok && next == '+' {
+			l.advance()
+			return Token{Type: TOKEN_CONCAT, Literal: "++", Line: line, Col: col}, nil
+		}
+		return Token{Type: TOKEN_ILLEGAL, Literal: "+", Line: line, Col: col},
+			fmt.Errorf("[bnn] line %d:%d — unexpected '+', did you mean '++' for string concatenation?", line, col)
 	default:
 		l.advance()
 		return Token{Type: TOKEN_ILLEGAL, Literal: string(ch), Line: line, Col: col},

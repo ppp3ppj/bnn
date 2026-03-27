@@ -11,21 +11,26 @@ import (
 //
 // Grammar:
 //
-//	manifest    = (var_binding | bunch_term)* EOF
-//	var_binding = VAR "=" string "."      e.g.  NodeVersion = "22".
-//	bunch_term  = "bunch" "(" atom "," bunch_args ")" "."
-//	bunch_args  = bunch_arg ("," bunch_arg)*
-//	bunch_arg   = runtime_arg | depends_arg | check_arg | steps_arg
-//	runtime_arg = "runtime" "(" atom ("," string_or_var)? ")"
-//	depends_arg = "depends" "(" "[" (atom ("," atom)*)? "]" ")"
-//	check_arg   = "check"   "(" string_or_var ")"
-//	steps_arg   = "steps"   "(" "[" (step ("," step)*)? "]" ")"
-//	step        = ("pre"|"run"|"post") "(" string_or_var ")"
+//	manifest      = (var_binding | bunch_term)* EOF
+//	var_binding   = VAR "=" concat_expr "."    e.g.  Label = "node-" ++ NodeVersion.
+//	concat_expr   = string_or_var ("++" string_or_var)*
 //	string_or_var = string | VAR
+//	bunch_term    = "bunch" "(" atom "," bunch_args ")" "."
+//	bunch_args    = bunch_arg ("," bunch_arg)*
+//	bunch_arg     = local_var | runtime_arg | depends_arg | check_arg | steps_arg
+//	local_var     = VAR "=" concat_expr        (no period — comma-separated arg)
+//	runtime_arg   = "runtime" "(" atom ("," string_or_var)? ")"
+//	depends_arg   = "depends" "(" "[" (atom ("," atom)*)? "]" ")"
+//	check_arg     = "check"   "(" string_or_var ")"
+//	steps_arg     = "steps"   "(" "[" (step ("," step)*)? "]" ")"
+//	step          = ("pre"|"run"|"post") "(" string_or_var ")"
+//
+// ++ is only allowed in var bindings (Rule 5). Use ~Var~ interpolation in steps/check/runtime.
 type Parser struct {
-	tokens []Token
-	pos    int
-	vars   map[string]string // bound variables: Name → value
+	tokens   []Token
+	pos      int
+	vars     map[string]string // bound variables: Name → value
+	warnings []string          // Rule 6: non-fatal issues collected during parsing
 }
 
 func NewParser(tokens []Token) *Parser {
@@ -111,16 +116,17 @@ func (p *Parser) parseManifest() (*ast.ManifestNode, error) {
 		}
 		m.Bunches = append(m.Bunches, b)
 	}
+	m.Warnings = p.warnings
 	return m, nil
 }
 
-// parseVarBinding = VAR "=" (string | VAR) "."
+// parseVarBinding = VAR "=" concat_expr "."
 func (p *Parser) parseVarBinding() (name, value string, err error) {
 	nameTok := p.advance() // consume VAR token
 	if _, err = p.expect(TOKEN_EQUALS, "="); err != nil {
 		return "", "", err
 	}
-	value, err = p.resolveStringOrVar("variable value")
+	value, err = p.resolveConcatExpr("variable value")
 	if err != nil {
 		return "", "", err
 	}
@@ -128,6 +134,59 @@ func (p *Parser) parseVarBinding() (name, value string, err error) {
 		return "", "", err
 	}
 	return nameTok.Literal, value, nil
+}
+
+// resolveConcatOperand resolves one operand of ++.
+// Gives Rule 1 error if an atom (bare identifier) is used — atoms are not strings.
+func (p *Parser) resolveConcatOperand(side string) (string, error) {
+	t := p.peek()
+	if t.Type == TOKEN_ATOM {
+		p.advance()
+		return "", fmt.Errorf("[bnn] line %d:%d — '++' requires string on %s, got atom %q — use a quoted string or variable",
+			t.Line, t.Col, side, t.Literal)
+	}
+	return p.resolveStringOrVar(side)
+}
+
+// resolveConcatExpr = string_or_var ("++" string_or_var)*
+// Rule 1: both sides must be string type (not atom).
+// Rule 3: result is always string type.
+// Rule 6: warns if either side is an empty string (valid, but no effect).
+func (p *Parser) resolveConcatExpr(context string) (string, error) {
+	val, err := p.resolveConcatOperand(context)
+	if err != nil {
+		return "", err
+	}
+	for p.peek().Type == TOKEN_CONCAT {
+		concatTok := p.advance() // consume ++
+		right, err := p.resolveConcatOperand("right side of ++")
+		if err != nil {
+			return "", err
+		}
+		// Rule 6 — warn, not error
+		if val == "" || right == "" {
+			which := "left"
+			if right == "" {
+				which = "right"
+			}
+			p.warnings = append(p.warnings,
+				fmt.Sprintf("[bnn] line %d:%d — concat with empty string has no effect (%s side is empty)",
+					concatTok.Line, concatTok.Col, which))
+		}
+		val = val + right
+	}
+	return val, nil
+}
+
+// forbidConcat enforces Rule 5: ++ is only allowed in variable assignments.
+// Call this after resolving a string value in check/runtime/steps.
+func (p *Parser) forbidConcat(context string) error {
+	if p.peek().Type == TOKEN_CONCAT {
+		t := p.peek()
+		return fmt.Errorf("[bnn] line %d:%d — '++' is not allowed in %s — build the string in a variable first:\n  Label = A ++ B.\n  %s(Label)",
+			t.Line, t.Col, context, context)
+	}
+	return nil
 }
 
 // interpolate scans s for ~VarName~ patterns and substitutes their values.
@@ -265,7 +324,7 @@ func (p *Parser) parseBunchArg(b *ast.BunchNode, localBound map[string]bool, out
 		if _, err := p.expect(TOKEN_EQUALS, "="); err != nil {
 			return err
 		}
-		value, err := p.resolveStringOrVar("variable value")
+		value, err := p.resolveConcatExpr("variable value")
 		if err != nil {
 			return err
 		}
@@ -339,6 +398,9 @@ func (p *Parser) parseRuntime() (ast.RuntimeNode, error) {
 		if err != nil {
 			return ast.RuntimeNode{}, err
 		}
+		if err := p.forbidConcat("runtime"); err != nil {
+			return ast.RuntimeNode{}, err
+		}
 		rt.Version = ver
 	}
 
@@ -394,6 +456,9 @@ func (p *Parser) parseCheck() (string, error) {
 	}
 	cmd, err := p.resolveStringOrVar("check command")
 	if err != nil {
+		return "", err
+	}
+	if err := p.forbidConcat("check"); err != nil {
 		return "", err
 	}
 	if _, err := p.expect(TOKEN_RPAREN, ")"); err != nil {
@@ -460,6 +525,9 @@ func (p *Parser) parseStep() (ast.StepNode, error) {
 	}
 	cmd, err := p.resolveStringOrVar("step command")
 	if err != nil {
+		return ast.StepNode{}, err
+	}
+	if err := p.forbidConcat("run/pre/post"); err != nil {
 		return ast.StepNode{}, err
 	}
 	if _, err := p.expect(TOKEN_RPAREN, ")"); err != nil {
