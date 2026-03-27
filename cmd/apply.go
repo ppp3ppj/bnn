@@ -10,7 +10,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newApplyCmd(conf string) *cobra.Command {
+func newApplyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "apply [bunch]",
 		Short: "Apply all bunches, or a specific bunch, from bnn.conf",
@@ -18,7 +18,7 @@ func newApplyCmd(conf string) *cobra.Command {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			dry, _ := cmd.Flags().GetBool("dry")
 
-			m, err := loadConf(conf)
+			m, err := loadConf(cfgPath(cmd))
 			if err != nil {
 				return err
 			}

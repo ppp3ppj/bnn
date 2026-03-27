@@ -6,12 +6,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newDoctorCmd(conf string, lookPath func(string) (string, error)) *cobra.Command {
+func newDoctorCmd(lookPath func(string) (string, error)) *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
 		Short: "Check prerequisites: mise in PATH, bnn.conf exists",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			conf := cfgPath(cmd)
 			w := cmd.OutOrStdout()
 			ok := true
 
@@ -24,12 +25,12 @@ func newDoctorCmd(conf string, lookPath func(string) (string, error)) *cobra.Com
 				fmt.Fprintf(w, "✓  mise found: %s\n", path)
 			}
 
-			// check 2: bnn.conf exists
+			// check 2: config file exists
 			if _, err := loadConf(conf); err != nil {
 				fmt.Fprintf(w, "✗  %s not found or invalid\n", conf)
 				ok = false
 			} else {
-				fmt.Fprintf(w, "✓  %s found\n", conf)
+				fmt.Fprintf(w, "✓  bnn.conf found: %s\n", conf)
 			}
 
 			if !ok {

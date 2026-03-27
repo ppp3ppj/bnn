@@ -18,23 +18,39 @@ A declarative machine setup tool powered by [mise](https://mise.jdx.dev), with a
 ```bash
 git clone https://github.com/ppp3ppj/bnn
 cd bnn
-go build -o bnn .
+make build        # compiles to ./bnn
 ```
 
 Or run directly without building:
 
 ```bash
-go run . <command>
+make run ARGS="apply --dry"
+```
+
+---
+
+## Config File
+
+bnn reads from a single config file:
+
+```
+~/.config/bnn/bnn.conf      default location
+```
+
+Override for a specific invocation:
+
+```bash
+bnn --config ~/projects/myapp/bnn.conf apply
 ```
 
 ---
 
 ## Quick Start
 
-Create a `bnn.conf` in your project or home directory:
+Create `~/.config/bnn/bnn.conf`:
 
 ```erlang
-% bnn.conf
+% ~/.config/bnn/bnn.conf
 
 RubyVersion = "3.3".
 NodeVersion = "22".
@@ -144,7 +160,49 @@ bnn doctor
 
 ```
 ✓  mise found: /home/user/.local/share/mise/bin/mise
-✓  bnn.conf found
+✓  bnn.conf found: /home/user/.config/bnn/bnn.conf
+```
+
+---
+
+## Development
+
+### Make targets
+
+```bash
+make build          # compile → ./bnn
+make run ARGS="apply --dry"   # go run without building
+
+make test           # all packages
+make test/dsl       # parser + lexer, verbose
+make test/visitor   # validator, resolver, dryrun, execute, verbose
+make test/cmd       # cobra CLI, verbose
+
+make fmt            # gofmt all source
+make vet            # go vet all packages
+make clean          # remove ./bnn binary
+make help           # list all targets
+```
+
+### Debug logging
+
+Activate with `BNN_DEBUG=1` — output goes to **stderr**:
+
+```bash
+BNN_DEBUG=1 bnn apply --dry
+# or via make:
+make debug
+```
+
+```
+[bnn:debug] parser: var NodeVersion = "22"
+[bnn:debug] parser: interpolate ~NodeVersion~ → "22"
+[bnn:debug] resolve: order → ruby → node → rails
+[bnn:debug] execute: bunch ruby — check: mise current ruby | grep 3.3
+[bnn:debug] execute: bunch ruby — check passed, skipping
+[bnn:debug] execute: bunch node — check failed, running
+[bnn:debug] execute: runtime mise install node@22
+[bnn:debug] execute: step run: npm install -g pnpm
 ```
 
 ---
@@ -159,7 +217,7 @@ bnn doctor
 
 ### Variables
 
-Variables follow Erlang's single-assignment rule. They must start with an **uppercase letter** or **underscore**.
+Variables follow Erlang's single-assignment rule. Must start with an **uppercase letter** or **underscore**.
 
 ```erlang
 NodeVersion = "22".              % string literal
@@ -172,7 +230,7 @@ Alias       = NodeVersion.       % copy from another variable
 - Must start with uppercase or `_` — `NodeVersion`, `_Height`
 - Single-assignment — rebinding the same variable is a parse-time error
 - Declare before use — top to bottom, same as Erlang
-- `++` is only allowed in variable assignments, not inside `steps`/`check`/`runtime`
+- `++` only allowed in variable assignments, not inside `steps`/`check`/`runtime`
 
 #### Manifest-level variables
 
@@ -195,15 +253,6 @@ bunch(node,
 ```
 
 **No shadowing** — a bunch-local variable cannot share a name with a manifest-level variable.
-
-```erlang
-NodeVersion = "22".
-
-bunch(node,
-    NodeVersion = "23",   % ERROR: NodeVersion is already declared at manifest level
-    ...
-).
-```
 
 **Same name across sibling bunches is fine** — each bunch is its own scope.
 
@@ -228,14 +277,11 @@ Use `~VarName~` inside any quoted string to expand a variable's value.
 ```erlang
 NodeVersion = "22".
 
-bunch(node,
-    runtime(mise, NodeVersion),
-    check("mise current node | grep ~NodeVersion~"),
-    steps([run("echo installing node ~NodeVersion~")])
-).
+check("mise current node | grep ~NodeVersion~")
+run("echo installing node ~NodeVersion~")
 ```
 
-- `~~` → literal `~` (escape sequence)
+- `~~` → literal `~`
 - Variable inside `~...~` must start with uppercase or `_`
 
 ### String Concatenation `++`
@@ -248,19 +294,13 @@ Label       = "node-" ++ NodeVersion.   % "node-22"
 FullLabel   = Label ++ "-lts".          % "node-22-lts"
 ```
 
-**Both sides must be strings** — atoms are not strings:
+Use `~Var~` interpolation inside steps/check instead of `++`:
 
 ```erlang
-Label = node ++ "-22".   % ERROR: '++' requires string on left side, got atom "node"
-```
-
-Use `~Var~` interpolation inside steps instead of `++`:
-
-```erlang
-% ERROR
+% ERROR — ++ not allowed here
 run("node-" ++ NodeVersion).
 
-% CORRECT
+% CORRECT — build in a variable, interpolate in the step
 Label = "node-" ++ NodeVersion.
 run("echo ~Label~")
 ```
@@ -291,8 +331,6 @@ depends([ruby, node])  % run after ruby and node are done
 depends([])            % no dependencies
 ```
 
-Bunch names are unquoted atoms.
-
 ### `check`
 
 Idempotency guard. If the command exits `0`, the entire bunch is skipped.
@@ -300,7 +338,6 @@ Idempotency guard. If the command exits `0`, the entire bunch is skipped.
 ```erlang
 check("mise current ruby | grep 3.3")
 check("command -v pnpm")
-check("test -f ~/.gitconfig")
 check(MyCheckVar)   % variable reference
 ```
 
@@ -320,7 +357,7 @@ steps([
 ## Execution Pipeline
 
 ```
-bnn.conf
+~/.config/bnn/bnn.conf
     ↓
   Lexer       tokenize source
     ↓
@@ -344,10 +381,8 @@ Validator     runtime valid, depends targets exist,
 
 ## Error Messages
 
-Errors include location and context:
-
 ```
-[bnn] line 4:7 — expected a variable binding or bunch declaration, found "foo"
+[bnn] line 4:7  — expected a variable binding or bunch declaration, found "foo"
 [bnn] line 1:12 — "nodeVersion" looks like a variable but variables must start
                   with an uppercase letter or _ (e.g. NodeVersion)
 [bnn] line 2:5  — NodeVersion is already bound (single-assignment only)
@@ -370,13 +405,16 @@ Errors include location and context:
 ```
 bnn/
 ├── main.go
-├── bnn.conf
+├── bnn.conf                     local dev config
 ├── ast/
 │   └── ast.go                   AST node types
-├── internal/parser/dsl/
-│   ├── lexer.go                 tokenizer
-│   ├── parser.go                tokens → AST, variable resolution
-│   └── parser_test.go
+├── internal/
+│   ├── log/
+│   │   └── log.go               debug logger (BNN_DEBUG=1)
+│   └── parser/dsl/
+│       ├── lexer.go             tokenizer
+│       ├── parser.go            tokens → AST, variable resolution
+│       └── parser_test.go
 ├── runner/
 │   └── runner.go                mise: Install, SetGlobal, Exec
 ├── visitor/
@@ -385,7 +423,7 @@ bnn/
 │   ├── dryrun.go                print-only walker
 │   └── execute.go               AST → mise runner
 └── cmd/
-    ├── root.go
+    ├── root.go                  --config flag, default ~/.config/bnn/bnn.conf
     ├── apply.go
     ├── status.go
     └── doctor.go

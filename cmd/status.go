@@ -7,13 +7,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func newStatusCmd(conf string) *cobra.Command {
+func newStatusCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "status",
 		Short: "Show installed vs declared state for each bunch",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			m, err := loadConf(conf)
+			m, err := loadConf(cfgPath(cmd))
 			if err != nil {
 				return err
 			}

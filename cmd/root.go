@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 
 	"github.com/ppp3ppj/bnn/ast"
 	"github.com/ppp3ppj/bnn/internal/parser/dsl"
@@ -13,10 +14,13 @@ import (
 
 // Execute is the entry point called from main.
 func Execute() error {
-	return NewRootCmd("bnn.conf", exec.LookPath).Execute()
+	home, _ := os.UserHomeDir()
+	defaultConf := filepath.Join(home, ".config", "bnn", "bnn.conf")
+	return NewRootCmd(defaultConf, exec.LookPath).Execute()
 }
 
 // NewRootCmd builds the command tree. Exported for testing.
+// conf is the default config path; tests pass a temp file path here.
 func NewRootCmd(conf string, lookPath func(string) (string, error)) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "bnn",
@@ -24,13 +28,24 @@ func NewRootCmd(conf string, lookPath func(string) (string, error)) *cobra.Comma
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
-	root.AddCommand(newApplyCmd(conf))
-	root.AddCommand(newStatusCmd(conf))
-	root.AddCommand(newDoctorCmd(conf, lookPath))
+
+	// --config overrides the config path for all subcommands.
+	// Subcommands read it via cmd.Root().PersistentFlags().GetString("config").
+	root.PersistentFlags().String("config", conf, "path to config file (default ~/.config/bnn/bnn.conf)")
+
+	root.AddCommand(newApplyCmd())
+	root.AddCommand(newStatusCmd())
+	root.AddCommand(newDoctorCmd(lookPath))
 	return root
 }
 
-// loadConf reads, parses, and validates bnn.conf at path.
+// cfgPath retrieves the resolved --config value from the root persistent flag.
+func cfgPath(cmd *cobra.Command) string {
+	path, _ := cmd.Root().PersistentFlags().GetString("config")
+	return path
+}
+
+// loadConf reads, parses, and validates the config file at path.
 func loadConf(path string) (*ast.ManifestNode, error) {
 	src, err := os.ReadFile(path)
 	if err != nil {
