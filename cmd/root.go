@@ -36,6 +36,7 @@ func NewRootCmd(conf string, lookPath func(string) (string, error)) *cobra.Comma
 	root.AddCommand(newApplyCmd())
 	root.AddCommand(newStatusCmd())
 	root.AddCommand(newDoctorCmd(lookPath))
+	root.AddCommand(newExportCmd())
 	return root
 }
 
