@@ -55,7 +55,7 @@ func applySingle(m *ast.ManifestNode, name string, dry bool, w io.Writer) error 
 		}
 	}
 	if target == nil {
-		return fmt.Errorf("bunch %q not found in bnn.conf", name)
+		return fmt.Errorf("[bnn] bunch '%s' not found — check the name in bnn.conf", name)
 	}
 
 	if dry {

@@ -32,7 +32,7 @@ func Resolve(m *ast.ManifestNode) ([]ast.BunchNode, error) {
 		for _, dep := range b.Depends {
 			j, ok := index[dep]
 			if !ok {
-				return nil, fmt.Errorf("bunch %q depends on unknown bunch %q", b.Name, dep)
+				return nil, fmt.Errorf("[bnn] bunch '%s' — depends on '%s' which is not declared", b.Name, dep)
 			}
 			inDegree[i]++
 			dependents[j] = append(dependents[j], i)
@@ -74,7 +74,7 @@ func Resolve(m *ast.ManifestNode) ([]ast.BunchNode, error) {
 				stuck = append(stuck, b.Name)
 			}
 		}
-		return nil, fmt.Errorf("circular dependency detected among: %s", strings.Join(stuck, ", "))
+		return nil, fmt.Errorf("[bnn] circular dependency — cannot resolve order for: %s", strings.Join(stuck, ", "))
 	}
 
 	return result, nil

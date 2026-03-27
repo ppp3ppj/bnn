@@ -33,7 +33,7 @@ func newDoctorCmd(conf string, lookPath func(string) (string, error)) *cobra.Com
 			}
 
 			if !ok {
-				return fmt.Errorf("doctor found issues — see above")
+				return fmt.Errorf("[bnn] prerequisites not met — fix the issues above and re-run bnn doctor")
 			}
 			return nil
 		},

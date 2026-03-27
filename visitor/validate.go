@@ -35,7 +35,7 @@ func Validate(m *ast.ManifestNode) error {
 	index := make(map[string]int, len(m.Bunches))
 	for i, b := range m.Bunches {
 		if _, exists := index[b.Name]; exists {
-			ve.add(fmt.Sprintf("duplicate bunch name %q", b.Name))
+			ve.add(fmt.Sprintf("[bnn] bunch '%s' — duplicate name, already declared above", b.Name))
 		} else {
 			index[b.Name] = i
 		}
@@ -44,13 +44,13 @@ func Validate(m *ast.ManifestNode) error {
 	for _, b := range m.Bunches {
 		// runtime type is valid
 		if !validRuntimes[b.Runtime.Type] {
-			ve.add(fmt.Sprintf("bunch %q: unknown runtime %q (must be mise, brew, or shell)", b.Name, b.Runtime.Type))
+			ve.add(fmt.Sprintf("[bnn] bunch '%s' — unknown runtime '%s' (valid: mise, brew, shell)", b.Name, b.Runtime.Type))
 		}
 
 		// depends targets exist
 		for _, dep := range b.Depends {
 			if _, ok := index[dep]; !ok {
-				ve.add(fmt.Sprintf("bunch %q: depends on unknown bunch %q", b.Name, dep))
+				ve.add(fmt.Sprintf("[bnn] bunch '%s' — depends on '%s' which is not declared", b.Name, dep))
 			}
 		}
 
@@ -63,19 +63,19 @@ func Validate(m *ast.ManifestNode) error {
 			}
 		}
 		if !hasRun {
-			ve.add(fmt.Sprintf("bunch %q: steps must contain at least one run()", b.Name))
+			ve.add(fmt.Sprintf("[bnn] bunch '%s' — steps must contain at least one run() command", b.Name))
 		}
 
 		// check is not empty if declared
 		if b.Check != "" && strings.TrimSpace(b.Check) == "" {
-			ve.add(fmt.Sprintf("bunch %q: check command must not be blank", b.Name))
+			ve.add(fmt.Sprintf("[bnn] bunch '%s' — check command is blank, provide a shell command or remove check(...)", b.Name))
 		}
 	}
 
 	// circular dependency detection (DFS)
 	if cycles := findCycles(m, index); len(cycles) > 0 {
 		for _, c := range cycles {
-			ve.add(fmt.Sprintf("circular dependency: %s", c))
+			ve.add(fmt.Sprintf("[bnn] circular dependency — %s", c))
 		}
 	}
 

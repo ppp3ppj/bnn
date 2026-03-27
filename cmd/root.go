@@ -34,7 +34,7 @@ func NewRootCmd(conf string, lookPath func(string) (string, error)) *cobra.Comma
 func loadConf(path string) (*ast.ManifestNode, error) {
 	src, err := os.ReadFile(path)
 	if err != nil {
-		return nil, fmt.Errorf("cannot read %s: %w", path, err)
+		return nil, fmt.Errorf("[bnn] cannot read %s — %w", path, err)
 	}
 	m, err := dsl.Parse(string(src))
 	if err != nil {

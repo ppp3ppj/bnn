@@ -138,7 +138,7 @@ func TestApply_unknownBunch_error(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for unknown bunch")
 	}
-	if !strings.Contains(err.Error(), `"python"`) {
+	if !strings.Contains(err.Error(), "'python'") {
 		t.Errorf("error should mention bunch name, got: %v", err)
 	}
 }

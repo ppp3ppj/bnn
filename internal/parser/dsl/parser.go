@@ -57,12 +57,12 @@ func (p *Parser) expect(tt TokenType, literal string) (Token, error) {
 	t := p.advance()
 	if t.Type != tt {
 		if literal != "" {
-			return t, fmt.Errorf("line %d:%d: expected %q, got %q", t.Line, t.Col, literal, t.Literal)
+			return t, fmt.Errorf("[bnn] line %d:%d — expected %q but found %q", t.Line, t.Col, literal, t.Literal)
 		}
-		return t, fmt.Errorf("line %d:%d: unexpected token %q (type %d)", t.Line, t.Col, t.Literal, t.Type)
+		return t, fmt.Errorf("[bnn] line %d:%d — unexpected token %q", t.Line, t.Col, t.Literal)
 	}
 	if literal != "" && t.Literal != literal {
-		return t, fmt.Errorf("line %d:%d: expected %q, got %q", t.Line, t.Col, literal, t.Literal)
+		return t, fmt.Errorf("[bnn] line %d:%d — expected %q but found %q", t.Line, t.Col, literal, t.Literal)
 	}
 	return t, nil
 }
@@ -81,7 +81,7 @@ func (p *Parser) parseManifest() (*ast.ManifestNode, error) {
 			break
 		}
 		if t.Type != TOKEN_KEYWORD || t.Literal != "bunch" {
-			return nil, fmt.Errorf("line %d:%d: expected 'bunch', got %q", t.Line, t.Col, t.Literal)
+			return nil, fmt.Errorf("[bnn] line %d:%d — expected a bunch declaration, found %q", t.Line, t.Col, t.Literal)
 		}
 		b, err := p.parseBunch()
 		if err != nil {
@@ -103,7 +103,8 @@ func (p *Parser) parseBunch() (ast.BunchNode, error) {
 
 	nameTok, err := p.expect(TOKEN_ATOM, "")
 	if err != nil {
-		return ast.BunchNode{}, fmt.Errorf("bunch name must be an atom: %w", err)
+		return ast.BunchNode{}, fmt.Errorf("[bnn] line %d:%d — bunch name must be an identifier (no quotes), found %q",
+			p.tokens[p.pos-1].Line, p.tokens[p.pos-1].Col, p.tokens[p.pos-1].Literal)
 	}
 
 	b := ast.BunchNode{Name: nameTok.Literal}
@@ -138,7 +139,7 @@ func (p *Parser) parseBunch() (ast.BunchNode, error) {
 func (p *Parser) parseBunchArg(b *ast.BunchNode) error {
 	t := p.peek()
 	if t.Type != TOKEN_KEYWORD {
-		return fmt.Errorf("line %d:%d: expected bunch arg keyword, got %q", t.Line, t.Col, t.Literal)
+		return fmt.Errorf("[bnn] line %d:%d — expected a bunch argument (runtime, depends, check, or steps), found %q", t.Line, t.Col, t.Literal)
 	}
 	switch t.Literal {
 	case "runtime":
@@ -166,7 +167,7 @@ func (p *Parser) parseBunchArg(b *ast.BunchNode) error {
 		}
 		b.Steps = steps
 	default:
-		return fmt.Errorf("line %d:%d: unknown bunch arg %q", t.Line, t.Col, t.Literal)
+		return fmt.Errorf("[bnn] line %d:%d — unknown argument %q (valid: runtime, depends, check, steps)", t.Line, t.Col, t.Literal)
 	}
 	return nil
 }
@@ -182,7 +183,8 @@ func (p *Parser) parseRuntime() (ast.RuntimeNode, error) {
 
 	typeTok, err := p.expect(TOKEN_ATOM, "")
 	if err != nil {
-		return ast.RuntimeNode{}, fmt.Errorf("runtime type must be an atom: %w", err)
+		return ast.RuntimeNode{}, fmt.Errorf("[bnn] line %d:%d — runtime type must be an identifier (mise, brew, or shell), found %q",
+			p.tokens[p.pos-1].Line, p.tokens[p.pos-1].Col, p.tokens[p.pos-1].Literal)
 	}
 	rt := ast.RuntimeNode{Type: ast.RuntimeKind(typeTok.Literal)}
 
@@ -191,7 +193,8 @@ func (p *Parser) parseRuntime() (ast.RuntimeNode, error) {
 		p.advance() // consume comma
 		verTok, err := p.expect(TOKEN_STRING, "")
 		if err != nil {
-			return ast.RuntimeNode{}, fmt.Errorf("runtime version must be a string: %w", err)
+			return ast.RuntimeNode{}, fmt.Errorf("[bnn] line %d:%d — runtime version must be a quoted string like \"3.3\", found %q",
+				p.tokens[p.pos-1].Line, p.tokens[p.pos-1].Col, p.tokens[p.pos-1].Literal)
 		}
 		rt.Version = verTok.Literal
 	}
@@ -218,7 +221,8 @@ func (p *Parser) parseDepends() ([]string, error) {
 	for p.peek().Type != TOKEN_RBRACKET {
 		t, err := p.expect(TOKEN_ATOM, "")
 		if err != nil {
-			return nil, fmt.Errorf("depends list must contain atoms: %w", err)
+			return nil, fmt.Errorf("[bnn] line %d:%d — depends list must contain bunch names (no quotes), found %q",
+				p.tokens[p.pos-1].Line, p.tokens[p.pos-1].Col, p.tokens[p.pos-1].Literal)
 		}
 		deps = append(deps, t.Literal)
 		if p.peek().Type == TOKEN_COMMA {
@@ -247,7 +251,8 @@ func (p *Parser) parseCheck() (string, error) {
 	}
 	cmd, err := p.expect(TOKEN_STRING, "")
 	if err != nil {
-		return "", fmt.Errorf("check argument must be a string: %w", err)
+		return "", fmt.Errorf("[bnn] line %d:%d — check command must be a quoted string, found %q",
+			p.tokens[p.pos-1].Line, p.tokens[p.pos-1].Col, p.tokens[p.pos-1].Literal)
 	}
 	if _, err := p.expect(TOKEN_RPAREN, ")"); err != nil {
 		return "", err
@@ -294,7 +299,7 @@ func (p *Parser) parseSteps() ([]ast.StepNode, error) {
 func (p *Parser) parseStep() (ast.StepNode, error) {
 	t := p.advance()
 	if t.Type != TOKEN_KEYWORD {
-		return ast.StepNode{}, fmt.Errorf("line %d:%d: expected step keyword (pre/run/post), got %q", t.Line, t.Col, t.Literal)
+		return ast.StepNode{}, fmt.Errorf("[bnn] line %d:%d — expected a step command (pre, run, or post), found %q", t.Line, t.Col, t.Literal)
 	}
 	var kind ast.StepKind
 	switch t.Literal {
@@ -305,7 +310,7 @@ func (p *Parser) parseStep() (ast.StepNode, error) {
 	case "post":
 		kind = ast.StepPost
 	default:
-		return ast.StepNode{}, fmt.Errorf("line %d:%d: unknown step kind %q", t.Line, t.Col, t.Literal)
+		return ast.StepNode{}, fmt.Errorf("[bnn] line %d:%d — %q is not a valid step keyword, use pre, run, or post", t.Line, t.Col, t.Literal)
 	}
 
 	if _, err := p.expect(TOKEN_LPAREN, "("); err != nil {
@@ -313,7 +318,8 @@ func (p *Parser) parseStep() (ast.StepNode, error) {
 	}
 	cmd, err := p.expect(TOKEN_STRING, "")
 	if err != nil {
-		return ast.StepNode{}, fmt.Errorf("step command must be a string: %w", err)
+		return ast.StepNode{}, fmt.Errorf("[bnn] line %d:%d — step command must be a quoted string, found %q",
+			p.tokens[p.pos-1].Line, p.tokens[p.pos-1].Col, p.tokens[p.pos-1].Literal)
 	}
 	if _, err := p.expect(TOKEN_RPAREN, ")"); err != nil {
 		return ast.StepNode{}, err

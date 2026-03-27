@@ -107,7 +107,7 @@ func (l *Lexer) readString() (Token, error) {
 	for {
 		ch, ok := l.peek()
 		if !ok {
-			return Token{}, fmt.Errorf("line %d:%d: unterminated string", line, col)
+			return Token{}, fmt.Errorf("[bnn] line %d:%d — unterminated string literal", line, col)
 		}
 		l.advance()
 		if ch == '"' {
@@ -117,7 +117,7 @@ func (l *Lexer) readString() (Token, error) {
 			// basic escape: \" \\
 			next, ok := l.peek()
 			if !ok {
-				return Token{}, fmt.Errorf("line %d:%d: unterminated escape", line, col)
+				return Token{}, fmt.Errorf("[bnn] line %d:%d — unterminated escape sequence in string", line, col)
 			}
 			l.advance()
 			switch next {
@@ -195,7 +195,7 @@ func (l *Lexer) Next() (Token, error) {
 	default:
 		l.advance()
 		return Token{Type: TOKEN_ILLEGAL, Literal: string(ch), Line: line, Col: col},
-			fmt.Errorf("line %d:%d: unexpected character %q", line, col, ch)
+			fmt.Errorf("[bnn] line %d:%d — unexpected character %q", line, col, ch)
 	}
 }
 

@@ -92,7 +92,7 @@ func TestValidate_dependsUnknown(t *testing.T) {
 	m := manifest(
 		bunch("rails", ast.RuntimeShell, []string{"ruby"}, "", run("gem install rails")),
 	)
-	assertInvalid(t, m, `depends on unknown bunch "ruby"`)
+	assertInvalid(t, m, "depends on 'ruby' which is not declared")
 }
 
 func TestValidate_dependsUnknown_multipleTargets(t *testing.T) {
@@ -103,7 +103,7 @@ func TestValidate_dependsUnknown_multipleTargets(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error")
 	}
-	if !strings.Contains(err.Error(), `"ruby"`) || !strings.Contains(err.Error(), `"node"`) {
+	if !strings.Contains(err.Error(), "'ruby'") || !strings.Contains(err.Error(), "'node'") {
 		t.Errorf("expected both missing deps reported, got: %v", err)
 	}
 }
@@ -114,7 +114,7 @@ func TestValidate_invalidRuntime(t *testing.T) {
 	m := manifest(
 		bunch("foo", ast.RuntimeKind("nvm"), nil, "", run("echo hi")),
 	)
-	assertInvalid(t, m, `unknown runtime "nvm"`)
+	assertInvalid(t, m, "unknown runtime 'nvm'")
 }
 
 func TestValidate_emptyRuntime(t *testing.T) {
@@ -131,7 +131,7 @@ func TestValidate_duplicateName(t *testing.T) {
 		bunch("ruby", ast.RuntimeMise, nil, "", run("gem install bundler")),
 		bunch("ruby", ast.RuntimeMise, nil, "", run("gem install rubocop")),
 	)
-	assertInvalid(t, m, `duplicate bunch name "ruby"`)
+	assertInvalid(t, m, "already declared above")
 }
 
 // --- rule: steps not empty (at least one run) ---
@@ -166,7 +166,7 @@ func TestValidate_blankCheck(t *testing.T) {
 	m := manifest(
 		bunch("ruby", ast.RuntimeMise, nil, "   ", run("gem install bundler")),
 	)
-	assertInvalid(t, m, "check command must not be blank")
+	assertInvalid(t, m, "check command is blank")
 }
 
 func TestValidate_emptyCheckIsOk(t *testing.T) {
@@ -233,7 +233,7 @@ func TestValidate_multipleErrors(t *testing.T) {
 	if !strings.Contains(msg, "unknown runtime") {
 		t.Errorf("missing runtime error in: %s", msg)
 	}
-	if !strings.Contains(msg, "unknown bunch") {
+	if !strings.Contains(msg, "which is not declared") {
 		t.Errorf("missing depends error in: %s", msg)
 	}
 	if !strings.Contains(msg, "at least one run()") {
