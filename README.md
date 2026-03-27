@@ -36,9 +36,12 @@ Create a `bnn.conf` in your project or home directory:
 ```erlang
 % bnn.conf
 
+RubyVersion = "3.3".
+NodeVersion = "22".
+
 bunch(ruby,
-    runtime(mise, "3.3"),
-    check("mise current ruby | grep 3.3"),
+    runtime(mise, RubyVersion),
+    check("mise current ruby | grep ~RubyVersion~"),
     steps([
         pre("echo preparing ruby"),
         run("gem install bundler"),
@@ -48,8 +51,8 @@ bunch(ruby,
 ).
 
 bunch(node,
-    runtime(mise, "22"),
-    check("mise current node | grep 22"),
+    runtime(mise, NodeVersion),
+    check("mise current node | grep ~NodeVersion~"),
     steps([
         run("npm install -g pnpm"),
         run("npm install -g typescript")
@@ -148,19 +151,125 @@ bnn doctor
 
 ## DSL Reference
 
-### Structure
-
-Every top-level term ends with `.`
+### Comments
 
 ```erlang
-bunch(name, arg1, arg2, ...).
+% this is a comment — rest of line is ignored
+```
+
+### Variables
+
+Variables follow Erlang's single-assignment rule. They must start with an **uppercase letter** or **underscore**.
+
+```erlang
+NodeVersion = "22".              % string literal
+Label       = "node-" ++ "22".  % string concatenation → "node-22"
+FullLabel   = Label ++ "-lts".  % chained concat → "node-22-lts"
+Alias       = NodeVersion.       % copy from another variable
+```
+
+**Rules:**
+- Must start with uppercase or `_` — `NodeVersion`, `_Height`
+- Single-assignment — rebinding the same variable is a parse-time error
+- Declare before use — top to bottom, same as Erlang
+- `++` is only allowed in variable assignments, not inside `steps`/`check`/`runtime`
+
+#### Manifest-level variables
+
+Declared at the top of the file with a `.` terminator. Visible to all bunches.
+
+```erlang
+NodeVersion = "22".
+```
+
+#### Bunch-local variables
+
+Declared inside a bunch as a comma-separated argument — no `.` terminator. Scoped to that bunch only.
+
+```erlang
+bunch(node,
+    Version = "22",    % local — gone after this bunch closes
+    runtime(mise, Version),
+    steps([...])
+).
+```
+
+**No shadowing** — a bunch-local variable cannot share a name with a manifest-level variable.
+
+```erlang
+NodeVersion = "22".
+
+bunch(node,
+    NodeVersion = "23",   % ERROR: NodeVersion is already declared at manifest level
+    ...
+).
+```
+
+**Same name across sibling bunches is fine** — each bunch is its own scope.
+
+```erlang
+bunch(node,
+    V = "22",
+    runtime(mise, V),
+    steps([...])
+).
+
+bunch(ruby,
+    V = "3.3",   % ✓ different bunch, different scope
+    runtime(mise, V),
+    steps([...])
+).
+```
+
+### String Interpolation
+
+Use `~VarName~` inside any quoted string to expand a variable's value.
+
+```erlang
+NodeVersion = "22".
+
+bunch(node,
+    runtime(mise, NodeVersion),
+    check("mise current node | grep ~NodeVersion~"),
+    steps([run("echo installing node ~NodeVersion~")])
+).
+```
+
+- `~~` → literal `~` (escape sequence)
+- Variable inside `~...~` must start with uppercase or `_`
+
+### String Concatenation `++`
+
+Build strings from parts using `++`. Only allowed in variable assignments.
+
+```erlang
+NodeVersion = "22".
+Label       = "node-" ++ NodeVersion.   % "node-22"
+FullLabel   = Label ++ "-lts".          % "node-22-lts"
+```
+
+**Both sides must be strings** — atoms are not strings:
+
+```erlang
+Label = node ++ "-22".   % ERROR: '++' requires string on left side, got atom "node"
+```
+
+Use `~Var~` interpolation inside steps instead of `++`:
+
+```erlang
+% ERROR
+run("node-" ++ NodeVersion).
+
+% CORRECT
+Label = "node-" ++ NodeVersion.
+run("echo ~Label~")
 ```
 
 ### `bunch` arguments
 
 | Argument | Required | Description |
 |---|---|---|
-| name | yes | identifier for this bunch (unquoted) |
+| name | yes | identifier for this bunch (unquoted atom) |
 | `runtime(...)` | yes | which tool manages this runtime |
 | `depends([...])` | no | bunches that must run before this one |
 | `check("cmd")` | no | shell command — if exits 0 the bunch is skipped |
@@ -170,6 +279,7 @@ bunch(name, arg1, arg2, ...).
 
 ```erlang
 runtime(mise, "3.3")   % mise installs and manages the version
+runtime(mise, Ver)     % version from a variable
 runtime(brew)          % homebrew manages this tool
 runtime(shell)         % no runtime manager, run steps directly
 ```
@@ -181,7 +291,7 @@ depends([ruby, node])  % run after ruby and node are done
 depends([])            % no dependencies
 ```
 
-Bunch names — unquoted, no quotes.
+Bunch names are unquoted atoms.
 
 ### `check`
 
@@ -191,6 +301,7 @@ Idempotency guard. If the command exits `0`, the entire bunch is skipped.
 check("mise current ruby | grep 3.3")
 check("command -v pnpm")
 check("test -f ~/.gitconfig")
+check(MyCheckVar)   % variable reference
 ```
 
 ### `steps`
@@ -204,12 +315,6 @@ steps([
 ])
 ```
 
-### Comments
-
-```erlang
-% this is a comment — rest of line is ignored
-```
-
 ---
 
 ## Execution Pipeline
@@ -219,9 +324,10 @@ bnn.conf
     ↓
   Lexer       tokenize source
     ↓
- Parser       tokens → AST
+ Parser       resolve variables, interpolation, and ++ at parse time
+              tokens → AST (all strings already expanded)
     ↓
-Validator     rules: runtime valid, depends targets exist,
+Validator     runtime valid, depends targets exist,
               no duplicate names, at least one run(),
               no circular dependencies
     ↓
@@ -241,7 +347,17 @@ Validator     rules: runtime valid, depends targets exist,
 Errors include location and context:
 
 ```
-[bnn] line 4:7 — expected a bunch declaration, found "foo"
+[bnn] line 4:7 — expected a variable binding or bunch declaration, found "foo"
+[bnn] line 1:12 — "nodeVersion" looks like a variable but variables must start
+                  with an uppercase letter or _ (e.g. NodeVersion)
+[bnn] line 2:5  — NodeVersion is already bound (single-assignment only)
+[bnn] line 3:5  — NodeVersion is already declared at manifest level
+                  — local variables cannot shadow global ones
+[bnn] line 5:20 — ~Suffix~ is not defined — declare it above with Suffix = "value".
+[bnn] line 8:12 — '++' requires string on left side, got atom "node"
+[bnn] line 8:12 — '++' is not allowed in run/pre/post — build the string in a variable first:
+                  Label = A ++ B.
+                  run/pre/post(Label)
 [bnn] bunch 'rails' — depends on 'ruby' which is not declared
 [bnn] circular dependency — rails → ruby → rails
 [bnn] bunch 'ruby' — steps must contain at least one run() command
@@ -259,7 +375,7 @@ bnn/
 │   └── ast.go                   AST node types
 ├── internal/parser/dsl/
 │   ├── lexer.go                 tokenizer
-│   ├── parser.go                tokens → AST
+│   ├── parser.go                tokens → AST, variable resolution
 │   └── parser_test.go
 ├── runner/
 │   └── runner.go                mise: Install, SetGlobal, Exec
