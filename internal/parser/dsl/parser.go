@@ -2,6 +2,7 @@ package dsl
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ppp3ppj/bnn/ast"
 )
@@ -127,7 +128,58 @@ func (p *Parser) parseVarBinding() (name, value string, err error) {
 	if _, err = p.expect(TOKEN_PERIOD, "."); err != nil {
 		return "", "", err
 	}
-	return nameTok.Literal, valTok.Literal, nil
+	// interpolate so vars can be composed: Base = "v~Major~.0".
+	value, err = p.interpolate(valTok.Literal, valTok.Line, valTok.Col)
+	if err != nil {
+		return "", "", err
+	}
+	return nameTok.Literal, value, nil
+}
+
+// interpolate scans s for ~VarName~ patterns and substitutes their values.
+// ~~ is an escape sequence that produces a literal ~.
+// Variable names inside ~...~ must start with uppercase or _.
+func (p *Parser) interpolate(s string, line, col int) (string, error) {
+	if !strings.ContainsRune(s, '~') {
+		return s, nil // fast path: nothing to expand
+	}
+	var sb strings.Builder
+	runes := []rune(s)
+	i := 0
+	for i < len(runes) {
+		if runes[i] != '~' {
+			sb.WriteRune(runes[i])
+			i++
+			continue
+		}
+		// find closing ~
+		j := i + 1
+		for j < len(runes) && runes[j] != '~' {
+			j++
+		}
+		if j >= len(runes) {
+			return "", fmt.Errorf("[bnn] line %d:%d — unterminated interpolation: missing closing ~ in %q", line, col, s)
+		}
+		name := string(runes[i+1 : j])
+		if name == "" {
+			// ~~ → literal ~
+			sb.WriteRune('~')
+			i = j + 1
+			continue
+		}
+		first := rune(name[0])
+		if !isUpper(first) && first != '_' {
+			return "", fmt.Errorf("[bnn] line %d:%d — ~%s~ is not a valid interpolation: variable names must start with an uppercase letter or _ (e.g. ~%s%s~)",
+				line, col, name, string(first-32), name[1:])
+		}
+		val, ok := p.vars[name]
+		if !ok {
+			return "", fmt.Errorf("[bnn] line %d:%d — ~%s~ is not defined — declare it above with %s = \"value\".", line, col, name, name)
+		}
+		sb.WriteString(val)
+		i = j + 1
+	}
+	return sb.String(), nil
 }
 
 // resolveStringOrVar reads either a quoted string or a variable reference.
@@ -137,7 +189,7 @@ func (p *Parser) resolveStringOrVar(context string) (string, error) {
 	switch t.Type {
 	case TOKEN_STRING:
 		p.advance()
-		return t.Literal, nil
+		return p.interpolate(t.Literal, t.Line, t.Col)
 	case TOKEN_VAR:
 		p.advance()
 		val, ok := p.vars[t.Literal]
