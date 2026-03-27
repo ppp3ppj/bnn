@@ -215,7 +215,7 @@ make run ARGS="apply --dry"   # go run without building
 
 make test           # all packages
 make test/dsl       # parser + lexer, verbose
-make test/visitor   # validator, resolver, dryrun, execute, verbose
+make test/visitor   # validator, resolver, dryrun, execute, export, verbose
 make test/cmd       # cobra CLI, verbose
 
 make fmt            # gofmt all source
@@ -461,12 +461,14 @@ bnn/
 │   ├── validate.go              rule checker
 │   ├── resolve.go               topological sort
 │   ├── dryrun.go                print-only walker
-│   └── execute.go               AST → mise runner
+│   ├── execute.go               AST → mise runner
+│   └── export.go                AST → bash script
 └── cmd/
     ├── root.go                  --config flag, default ~/.config/bnn/bnn.conf
     ├── apply.go
     ├── status.go
-    └── doctor.go
+    ├── doctor.go
+    └── export.go
 ```
 
 ---
